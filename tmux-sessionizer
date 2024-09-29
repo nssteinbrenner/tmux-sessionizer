@@ -26,7 +26,7 @@ shout() {
 
 show_help() {
     cat << EOF
-Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [-v|--version] [SEARCH_TERM]
+Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [SEARCH_TERM]
 Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
 If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
 is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
@@ -57,7 +57,6 @@ Command line flags:
                         3.
     -h|--help           Print this menu and exit.
     -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
-    -v|--verbose        Enable debug logging.
 EOF
 }
 
@@ -137,9 +136,19 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [[ "$sessions" = true ]]; then
-    selected=$(tmux list-sessions | fzf | cut -d ":" -f 1)
-    debug "Selected session ${selected}. Attaching."
-    tmux attach-session -t "${selected}"
+    sessions=$(tmux list-sessions 2> /dev/null)
+    if [[ $? -eq 0 ]]; then
+        selected=$(shout "$sessions" | fzf)
+        if [[ -z "$selected" ]]; then
+            shout "No results selected."
+            exit 0
+        fi
+        selected_name=$(shout "$selected" | cut -d ":" -f 1)
+        debug "Selected session ${selected_name}. Attaching."
+        tmux attach-session -t "${selected_name}"
+    else
+        shout "No active sessions."
+    fi
     exit 0
 fi
 
