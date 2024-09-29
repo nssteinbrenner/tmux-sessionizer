@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+
+non_empty_error="requires a non-empty argument"
+
+config="${HOME}/.config/tmux-sessionizer/config"
+maxdepth=1
+mindepth=1
+directories=()
+verbose=false
+sessions=false
+
+die() {
+    shout "ERROR: $1" >&2
+    exit 1
+}
+
+debug() {
+    if [[ "$verbose" = true ]]; then
+        shout "DEBUG: $1"
+    fi
+}
+
+shout() {
+ printf "%s\n" "$1"
+}
+
+show_help() {
+    cat << EOF
+Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [SEARCH_TERM]
+Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
+If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
+is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
+exists for SEARCH_TERM or the selected directory, open that session instead of creating a new one.
+
+Options can be specified through a configuration file, or command line flags. Additionally, the
+path to the config file through an environment variable. Arugments are parsed in following
+order of least to most weighted:
+    Configuration file < Environment variable < Command line flags.
+
+Configuration file:
+    directory=${HOME}/other,2,3
+    directory=${HOME}/projects,3,3
+
+Environment variables:
+    TMS_CONFIG="${HOME}/.config/tmux-sessionizer/config"
+
+Command line flags:
+    -c|--config         Specify a configuration file to read settings from.
+                        Format is in key=value pairs. [Default: ${HOME}/.config/tmux-sessionizer/config]
+    -d|--directory      Specify the directories to search within, and the depth to search.
+                        Can be specified multiple times. Must be a CSV in the format of:
+                            PATH,MINDEPTH (default 1),MAXDEPTH (default 1)
+                        For example, if you run the command with the flag:
+                            -d "${HOME}/repositories,3,3" -d "${HOME}/workspaces,2,3"
+                        It will search ${HOME}/repositories with a mindepth and maxdepth of 3.
+                        ${HOME}/workspaces will be searched with a mindepth of 2 and maxdepth of
+                        3.
+    -h|--help           Print this menu and exit.
+    -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
+EOF
+}
+
+trim() {
+    echo "$1" | xargs
+}
+
+warn() {
+    shout "WARN: $1"
+}
+
+if [[ -n "$TMS_CONFIG" ]]; then
+    config="$TMS_CONFIG"
+fi
+
+debug "Reading config ${config}."
+if [[ -f "$config" ]]; then
+    while IFS="=" read key value; do
+        [[ "$key" =~ ^\s*# ]] || [[ -z "$key" ]] && continue
+
+        key=$(trim "$key")
+        value=$(trim "$value")
+        value=$(envsubst <<< "$value")
+
+        debug "Evaluating key: ${key}, value: ${value}."
+        case "$key" in
+            directory) directories+=("$value") ;;
+            *) warn "Unknown key ${key}. Skipping..." ;;
+        esac
+    done < $config
+fi
+
+cli_directories=()
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit
+            ;;
+        -d|--directory)
+            if [[ "$2" ]]; then
+                cli_directories+=($2)
+                shift
+            else
+                die "--directories ${non_empty_error}"
+            fi
+            ;;
+        --directory=?*)
+            cli_directories+=${1#*=}
+            ;;
+        -c|--config)
+            if [[ "$2" ]]; then
+                config=$2
+                shift
+            else
+                die "--config ${non_empty_error}"
+            fi
+            ;;
+        --config=?*)
+            config=${1#*=}
+            ;;
+        -s|--sessions)
+            sessions=true
+            ;;
+        -v|--verbose)
+            verbose=true
+            ;;
+        -?*)
+            warn "Unknown option: ${1}. Skipping..." >&2
+            ;;
+        *)
+            search=$1
+            debug "Setting search to $1"
+            ;;
+    esac
+    shift
+done
+
+if [[ "$sessions" = true ]]; then
+    selected=$(tmux list-sessions | fzf | cut -d ":" -f 1)
+    debug "Selected session ${selected}. Attaching."
+    tmux attach-session -t "${selected}"
+    exit 0
+fi
+
+if [[ "${#cli_directories[@]}" -gt 0 ]]; then
+    directories=("${cli_directories[@]}")
+fi
+
+if [[ "${#directories[@]}" -eq 0 ]]; then
+    die "Must specify at least one directory either through config file or CLI flag."
+fi
+
+for directory in "${directories[@]}"; do
+    IFS="," read path mindepth maxdepth <<< "$directory"
+
+    if [[ -z "$mindepth" ]]; then
+        debug "mindepth not specified. Defaulting to 1."
+        mindepth=1
+    fi
+
+    if [[ -z "$maxdepth" ]]; then
+        debug "maxdepth not specified. Defaulting to 1."
+        maxdepth=1
+    fi
+
+    if [[ -d "$path" ]]; then
+        debug "Running: \"find ${path} -mindepth ${mindepth} -maxdepth ${maxdepth} -type d\""
+        results=$(find ${path} -mindepth ${mindepth} -maxdepth ${maxdepth} -type d)
+        debug "Results: ${results}"
+        all_results+=$(shout "$results")
+    else
+        warn "Path ${path} not found. Skipping..."
+    fi
+done
+
+if [[ -z all_results ]]; then
+    die "No directories found with specified criteria."
+fi
+
+if [[ -n "$search" ]]; then
+    selected=$(shout "$all_results" | grep "$search")
+    debug "Selected: ${selected}"
+    number_of_results=$(shout "$selected" | wc -l)
+    debug "Number of results: ${number_of_results}"
+    if [[ $number_of_results -gt 1 ]]; then
+        selected=$(shout "$selected" | fzf)
+    elif [[ $number_of_results -lt 1 ]]; then
+        die "Directory not found."
+    fi
+else
+    debug "No search term. Querying all results"
+    selected=$(shout "$all_results" | fzf)
+fi
+
+if [[ -z $selected ]]; then
+    shout "No results selected."
+    exit 0
+fi
+
+selected_name=$(basename "$selected" | tr . _)
+tmux_running=$(pgrep tmux)
+
+if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+    debug "Starting new session with ${selected_name} name in ${selected} directory."
+    tmux new-session -s $selected_name -c "$selected"
+    exit 0
+fi
+
+if [[ $(tmux has-session -t=$selected_name > /dev/null 2>&1; echo $?) -eq 0 ]]; then
+    debug "Session exists. Attaching to ${selected_name} session in ${selected} directory."
+    tmux attach-session -t=$selected_name -c "$selected"
+else
+    debug "Starting new session in detached mode with ${selected_name} in ${selected} directory."
+    tmux new-session -ds $selected_name -c $selected
+fi
+
+if [[ -z $TMUX ]]; then
+    debug "Attaching to session ${selected_name}"
+    tmux attach-session -t $selected_name
+else
+    debug "Switching to ${selected_name}"
+    tmux switch-client -t $selected_name
+fi
