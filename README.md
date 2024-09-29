@@ -1,88 +1,157 @@
+
 # tmux-sessionizer
 
-tmux-sessionizer is a script that was taken from [Primeagen](https://github.com/ThePrimeagen/.dotfiles/blob/master/bin/.local/scripts/tmux-sessionizer) and adjusted to be more configurable.
+**tmux-sessionizer** is a configurable script that searches for subdirectories based on a user-provided search term and opens a tmux session in the matching directory. If the term matches exactly one directory, it opens a session immediately. Otherwise, it presents search results in a fuzzy finder for the user to select the desired directory. If a session already exists for the directory, it attaches to the existing session.
 
-tmux-sessionizer searches for subdirectories within a path based off a user provided search term. If the search term is found and matches exactly 1 directory,  it opens a tmux session in that directory. Otherwise, it will open the search results in a fuzzy finder, and allow the user to select which directory they'd like to open in tmux. If a session already exists for the directory, it attaches to the existing session instead.
+Adapted from [Primeagen's script](https://github.com/ThePrimeagen/.dotfiles/blob/master/bin/.local/scripts/tmux-sessionizer), **tmux-sessionizer** offers more configurability.
 
 ## Usage
-```
-Usage: ./tmux-sessionizer [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [SEARCH_TERM]
-Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
-If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
-is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
-exists for SEARCH_TERM or the selected directory, open that session instead of creating a new one.
 
-Options can be specified through a configuration file, or command line flags. Additionally, the
-path to the config file through an environment variable. Arugments are parsed in following
-order of least to most weighted:
-    Configuration file < Environment variable < Command line flags.
-
-Configuration file:
-    directory=${HOME}/other,2,3
-    directory=${HOME}/projects,3,3
-
-Environment variables:
-    TMS_CONFIG="${HOME}/.config/tmux-sessionizer/config"
-
-Command line flags:
-    -c|--config         Specify a configuration file to read settings from.
-                        Format is in key=value pairs. [Default: ${HOME}/.config/tmux-sessionizer/config]
-    -d|--directory      Specify the directories to search within, and the depth to search.
-                        Can be specified multiple times. Must be a CSV in the format of:
-                            PATH,MINDEPTH (default 1),MAXDEPTH (default 1)
-                        For example, if you run the command with the flag:
-                            -d "${HOME}/repositories,3,3" -d "${HOME}/workspaces,2,3"
-                        It will search ${HOME}/repositories with a mindepth and maxdepth of 3.
-                        ${HOME}/workspaces will be searched with a mindepth of 2 and maxdepth of
-                        3.
-    -h|--help           Print this menu and exit.
-    -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
-    -v|--verbose        Enable debug logging.
+```bash
+./tmux-sessionizer [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [-n|--new] [SEARCH_TERM]
 ```
 
-### -d/--directory
-You specify the paths to parse using this flag.
+- Searches `[-d|--directory]` for `SEARCH_TERM`. If found, opens a tmux session for those directories.
+- If no search term is provided, it opens all directories in a fuzzy finder, allowing the user to select a directory to start a session.
+- If a session for `SEARCH_TERM` or the selected directory already exists, it opens the existing session instead of creating a new one.
+- With `-n|--new`, it creates the target directory and opens a tmux session in it.
 
-At least one directory must be specified, either through the CLI or through the configuration file if calling without --sessions.
+### Argument Precedence
 
-#### CLI
-Configuration must be in the format of:
-`--directory PATH,MINDEPTH,MAXDEPTH`
-MINDEPTH and MAXDEPTH both defualt to 1.
-In the CLI, you can specify multiple directories using multiple flags:
+Arguments are parsed in the following order of priority:
+1. **Configuration file**
+2. **Environment variable**
+3. **Command line flags**
+
+## Options
+
+- `-c|--config`: Specify a config file to read settings from. Format: key=value pairs. Defaults to `${HOME}/.config/tmux-sessionizer/config`.
+- `-d|--directory`: Specify directories to search in, along with search depth. Multiple directories can be specified as a comma-separated value (CSV):
+  `PATH,MINDEPTH,MAXDEPTH`.
+  PATH is required. MINDEPTH and MAXDEPTH both default to 1.
+  For example:
+  ```bash
+  -d "${HOME}/repositories,3,3" -d "${HOME}/workspaces,2,3"
+  ```
+  This will search:
+
+  - `${HOME}/repositories` with mindepth and maxdepth of 3
+  - `${HOME}/workspaces` with mindepth of 2 and maxdepth of 3
+
+- `-n|--new`: Create a new directory and open a tmux session inside it.
+- `-s|--sessions`: Search for active tmux sessions using a fuzzy finder. Incompatible with `-d|--directory` and `-n|--new`.
+- `-v|--verbose`: Enable debug logging.
+- `-h|--help`: Display this help message and exit.
+
+## Configuration File Format
+
+Options can be specified through a configuration file located at `${HOME}/.config/tmux-sessionizer/config` or a custom path provided with the `-c` flag or an environment variable.
+
+Example configuration file:
+```bash
+directory=${HOME}/projects,2,3
+directory=${HOME}/other,1,2
 ```
+
+## Environment Variables
+
+You can specify the config file path through the `TMS_CONFIG` environment variable:
+```bash
+export TMS_CONFIG="${HOME}/.config/tmux-sessionizer/config"
+tmux-sessionizer
+```
+
+## Examples
+
+- Search for a folder under a specific directory:
+  ```bash
+  tmux-sessionizer -d /home/my-user/repositories,1,1 my-repo
+  ```
+
+- Search across multiple directories:
+  ```bash
+  tmux-sessionizer -d /home/my-user/workspaces,1,1 -d /home/my-user/repositories,1,1
+  ```
+
+- Create a new directory and open a session in it:
+  ```bash
+  tmux-sessionizer -n /home/my-user/repositories/my-repo
+  ```
+
+- Search for existing tmux sessions:
+  ```bash
+  tmux-sessionizer -s
+  ```
+
+- Run with a custom config file:
+  ```bash
+  tmux-sessionizer -c /home/my-user/tmux-sessionizer.conf
+  ```
+
+## Flags in Detail
+
+### `-d|--directory`
+
+Specifies the directories to search in. At least one directory must be provided either through the CLI or a configuration file if not using the `--sessions` flag.
+
+**Format:**
+```
+--directory PATH,MINDEPTH,MAXDEPTH
+```
+Both `MINDEPTH` and `MAXDEPTH` default to 1.
+
+#### Multiple Directories (CLI)
+
+Use multiple `-d` flags to specify multiple directories:
+```bash
 tmux-sessionizer -d ${HOME}/repositories,3,3 -d ${HOME}/workspaces,1,1
 ```
-#### Config file
-Configuration must be specified in the format of:
-`directory=PATH,MINDEPTH,MAXDEPTH`
-MINDEPTH and MAXDEPTH both default to 1.
 
-Environment variables can be used in the config file.
-Example:
+#### Configuration File
+
+In the config file, use the following format:
 ```
+directory=PATH,MINDEPTH,MAXDEPTH
+```
+Example:
+```bash
 directory=${HOME}/workspaces,1,1
 directory=${HOME}/repositories,3,3
 ```
 
-### -c/--config
-Specifies path to the config file.
+### `-c|--config`
 
-Defaults to ${HOME}/.config/tmux-sessionizer/config
+Specifies the path to a configuration file.
 
-#### CLI
-```
+**Default**: `${HOME}/.config/tmux-sessionizer/config`
+
+#### CLI Example
+```bash
 tmux-sessionizer -c ${HOME}/.config/tmux-sessionizer/config
 ```
-#### Environment Variable
-```
+
+#### Environment Variable Example
+```bash
 TMS_CONFIG=${HOME}/.config/tmux-sessionizer/config tmux-sessionizer
 ```
 
-### -s/--sessions
-Searches through active tmux sessions in a fuzzy finder.
+### `-s|--sessions`
 
-#### CLI
+Searches active tmux sessions via fuzzy finder.
+Incompatible with `-d|--directory` and `-n|--new`.
+
+#### CLI Example
+```bash
+tmux-sessionizer -s
 ```
-tmus-sessionizer -s
+
+### `-n|--new`
+
+Creates a new target directory and opens a tmux session inside it.
+
+Incompatible with `-d|--directory` and `-s|--sessions`. A search term must not be specified.
+
+#### CLI Example
+```bash
+tmux-sessionizer --new /home/my-user/repositories/my-repo
 ```

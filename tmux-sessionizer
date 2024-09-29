@@ -3,9 +3,6 @@
 non_empty_error="requires a non-empty argument"
 
 config="${HOME}/.config/tmux-sessionizer/config"
-maxdepth=1
-mindepth=1
-directories=()
 verbose=false
 sessions=false
 
@@ -26,11 +23,14 @@ shout() {
 
 show_help() {
     cat << EOF
-Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [SEARCH_TERM]
+Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [-n|--new] [SEARCH_TERM]
 Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
 If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
 is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
 exists for SEARCH_TERM or the selected directory, open that session instead of creating a new one.
+
+If -n|--new is specified, it will instead create the target directory, and open a tmux session
+within that directory.
 
 Options can be specified through a configuration file, or command line flags. Additionally, the
 path to the config file through an environment variable. Arugments are parsed in following
@@ -49,13 +49,15 @@ Command line flags:
                         Format is in key=value pairs. [Default: ${HOME}/.config/tmux-sessionizer/config]
     -d|--directory      Specify the directories to search within, and the depth to search.
                         Can be specified multiple times. Must be a CSV in the format of:
-                            PATH,MINDEPTH (default 1),MAXDEPTH (default 1)
+                            PATH,MINDEPTH,MAXDEPTH
+                        PATH is required. MINDEPTH and MAXDEPTH both default to 1.
                         For example, if you run the command with the flag:
                             -d "${HOME}/repositories,3,3" -d "${HOME}/workspaces,2,3"
                         It will search ${HOME}/repositories with a mindepth and maxdepth of 3.
                         ${HOME}/workspaces will be searched with a mindepth of 2 and maxdepth of
                         3.
     -h|--help           Print this menu and exit.
+    -n|--new            Create a new directory and open a tmux session inside of it.
     -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
     -v|--verbose        Enable debug logging.
 EOF
@@ -119,6 +121,17 @@ while [[ "$#" -gt 0 ]]; do
         --config=?*)
             config=${1#*=}
             ;;
+        -n|--new)
+            if [[ "$2" ]]; then
+                new_directory="$2"
+                shift
+            else
+                die "--new ${non_empty_error}"
+            fi
+            ;;
+        --new=?*)
+            new_directory=${1#*=}
+            ;;
         -s|--sessions)
             sessions=true
             ;;
@@ -130,14 +143,31 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         *)
             search=$1
-            debug "Setting search to $1"
+            debug "Setting search to ${1}"
             ;;
     esac
     shift
 done
 
+tmux_running=$(pgrep tmux)
 if [[ "$sessions" = true ]]; then
-    sessions=$(tmux list-sessions 2> /dev/null)
+    if [[ -n "$new_directory" ]]; then
+        die "-s|--sessions cannot be specified with -n|--new"
+    fi
+
+    if [[ -n "$cli_directories" ]]; then
+        die "-s|--sessions cannot be specified with -d|--directory"
+    fi
+
+    if [[ -z $tmux_running ]]; then
+        die "Tmux is not running."
+    fi
+
+    if [[ -n "$search" ]]; then
+        sessions=$(tmux list-sessions 2>/dev/null | grep "$search")
+    else
+        sessions=$(tmux list-sessions 2> /dev/null)
+    fi
     if [[ $? -eq 0 ]]; then
         selected=$(shout "$sessions" | fzf)
         if [[ -z "$selected" ]]; then
@@ -153,7 +183,32 @@ if [[ "$sessions" = true ]]; then
     exit 0
 fi
 
-if [[ "${#cli_directories[@]}" -gt 0 ]]; then
+if [[ -n "$new_directory" ]]; then
+    if [[ -n "$search" ]]; then
+        die "-n|--new cannot be specified with a search parameter"
+    fi
+
+    if [[ -n "$cli_directories" ]]; then
+        die "-n|--new cannot be specified with -d|--directory"
+    fi
+
+    if [[ -d "$new_directory" ]]; then
+        shout "Directory ${new_directory} already exists. Skipping."
+    else
+        mkdir -p "$new_directory"
+        if [[ $? -ne 0 ]]; then
+            die "Create directory ${new_directory} failed. Exiting."
+        fi
+    fi
+fi
+
+if [[ -n "$new_directory" ]]; then
+    parent_directory=$(dirname "$new_directory")
+    debug "Setting directory to ${parent_directory}"
+    directories=("$parent_directory")
+    debug "Setting search to ${new_directory}"
+    search="$new_directory"
+elif [[ "${#cli_directories[@]}" -gt 0 ]]; then
     directories=("${cli_directories[@]}")
 fi
 
@@ -209,7 +264,6 @@ if [[ -z $selected ]]; then
 fi
 
 selected_name=$(basename "$selected" | tr . _)
-tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
     debug "Starting new session with ${selected_name} name in ${selected} directory."
