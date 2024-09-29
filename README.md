@@ -6,7 +6,7 @@ tmux-sessionizer searches for subdirectories within a path based off a user prov
 
 ## Usage
 ```
-Usage: ./tmux-sessionizer [-c|--config] [-d|--directory] [-s|--sessions] [SEARCH_TERM]
+Usage: ./tmux-sessionizer [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [SEARCH_TERM]
 Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
 If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
 is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
@@ -37,19 +37,27 @@ Command line flags:
                         3.
     -h|--help           Print this menu and exit.
     -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
+    -v|--verbose        Enable debug logging.
 ```
 
 ### -d/--directory
-You specify the paths to parse using this flag. If you are using the configuration file, it will be in the format of directory=PATH,MINDEPTH,MAXDEPTH within the file:
+You specify the paths to parse using this flag.
 
 At least one directory must be specified, either through the CLI or through the configuration file if calling without --sessions.
 
 #### CLI
+Configuration must be in the format of:
+`--directory PATH,MINDEPTH,MAXDEPTH`
+MINDEPTH and MAXDEPTH both defualt to 1.
 In the CLI, you can specify multiple directories using multiple flags:
 ```
 tmux-sessionizer -d ${HOME}/repositories,3,3 -d ${HOME}/workspaces,1,1
 ```
 #### Config file
+Configuration must be specified in the format of:
+`directory=PATH,MINDEPTH,MAXDEPTH`
+MINDEPTH and MAXDEPTH both default to 1.
+
 Environment variables can be used in the config file.
 Example:
 ```
