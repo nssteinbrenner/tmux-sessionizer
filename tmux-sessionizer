@@ -26,7 +26,7 @@ shout() {
 
 show_help() {
     cat << EOF
-Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [SEARCH_TERM]
+Usage: ${0##/} [-c|--config] [-d|--directory] [-s|--sessions] [-v|--verbose] [SEARCH_TERM]
 Search [-d|--directory] for SEARCH_TERM. If found, open a tmux session those directories.
 If search term is not specified, open the entire directories in a fuzzy finder. Once a directory
 is selected in the fuzzy finder, a tmux session is started in the directory. If a session already
@@ -57,6 +57,7 @@ Command line flags:
                         3.
     -h|--help           Print this menu and exit.
     -s|--sessions       Search for existing tmux sessions in a fuzzy finder.
+    -v|--verbose        Enable debug logging.
 EOF
 }
 
