@@ -17,6 +17,23 @@ debug() {
     fi
 }
 
+search() {
+    if [[ -n "$2" ]]; then
+        selected=$(shout "$1" | grep "$2")
+        debug "Selected: ${selected}"
+        number_of_results=$(shout "$selected" | wc -l)
+        debug "Number of results: ${number_of_results}"
+        if [[ "$number_of_results" -gt 1 ]]; then
+            selected=$(shout "$selected" | fzf)
+        elif [[ "$number_of_results" -lt 1 ]]; then
+            die "No results found."
+        fi
+    else
+        debug "No search term provided. Querying all results"
+        selected=$(shout "$1" | fzf)
+    fi
+}
+
 shout() {
  printf "%s\n" "$1"
 }
@@ -65,6 +82,25 @@ EOF
 
 trim() {
     echo "$1" | xargs
+}
+
+tmux_connect() {
+    if [[ -z $TMUX ]]; then
+        tmux_command="attach-session"
+        msg="Attaching to ${1} session"
+    else
+        tmux_command="switch-client"
+        msg="Switching to ${1} session"
+    fi
+
+    if [[ $(tmux has-session -t="$1" > /dev/null 2>&1; echo $?) -eq 0 ]]; then
+        debug "Session exists"
+    else
+        debug "Starting new session in detached mode with ${1} in ${2} directory."
+        tmux new-session -ds "$1" -c "$2"
+    fi
+    debug "$msg"
+    tmux "$tmux_command" -t "$1"
 }
 
 warn() {
@@ -150,6 +186,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 tmux_running=$(pgrep tmux)
+
 if [[ "$sessions" = true ]]; then
     if [[ -n "$new_directory" ]]; then
         die "-s|--sessions cannot be specified with -n|--new"
@@ -163,23 +200,21 @@ if [[ "$sessions" = true ]]; then
         die "Tmux is not running."
     fi
 
-    if [[ -n "$search" ]]; then
-        sessions=$(tmux list-sessions 2>/dev/null | grep "$search")
-    else
-        sessions=$(tmux list-sessions 2> /dev/null)
-    fi
-    if [[ $? -eq 0 ]]; then
-        selected=$(shout "$sessions" | fzf)
-        if [[ -z "$selected" ]]; then
-            shout "No results selected."
-            exit 0
-        fi
-        selected_name=$(shout "$selected" | cut -d ":" -f 1)
-        debug "Selected session ${selected_name}. Attaching."
-        tmux attach-session -t "${selected_name}"
-    else
+
+    results=$(tmux list-sessions 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
         shout "No active sessions."
+        exit 0
     fi
+
+    search "$results" "$search"
+    if [[ -z "$selected" ]]; then
+        shout "No results selected."
+        exit 0
+    fi
+
+    selected_name=$(shout "$selected" | cut -d ":" -f 1)
+    tmux_connect "$selected_name" "$selected"
     exit 0
 fi
 
@@ -243,20 +278,7 @@ if [[ -z all_results ]]; then
     die "No directories found with specified criteria."
 fi
 
-if [[ -n "$search" ]]; then
-    selected=$(shout "$all_results" | grep "$search")
-    debug "Selected: ${selected}"
-    number_of_results=$(shout "$selected" | wc -l)
-    debug "Number of results: ${number_of_results}"
-    if [[ $number_of_results -gt 1 ]]; then
-        selected=$(shout "$selected" | fzf)
-    elif [[ $number_of_results -lt 1 ]]; then
-        die "Directory not found."
-    fi
-else
-    debug "No search term. Querying all results"
-    selected=$(shout "$all_results" | fzf)
-fi
+search "$all_results" "$search"
 
 if [[ -z $selected ]]; then
     shout "No results selected."
@@ -265,24 +287,5 @@ fi
 
 selected_name=$(basename "$selected" | tr . _)
 
-if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-    debug "Starting new session with ${selected_name} name in ${selected} directory."
-    tmux new-session -s $selected_name -c "$selected"
-    exit 0
-fi
-
-if [[ $(tmux has-session -t=$selected_name > /dev/null 2>&1; echo $?) -eq 0 ]]; then
-    debug "Session exists. Attaching to ${selected_name} session in ${selected} directory."
-    tmux attach-session -t=$selected_name -c "$selected"
-else
-    debug "Starting new session in detached mode with ${selected_name} in ${selected} directory."
-    tmux new-session -ds $selected_name -c $selected
-fi
-
-if [[ -z $TMUX ]]; then
-    debug "Attaching to session ${selected_name}"
-    tmux attach-session -t $selected_name
-else
-    debug "Switching to ${selected_name}"
-    tmux switch-client -t $selected_name
-fi
+tmux_connect "$selected_name" "$selected"
+exit 0
