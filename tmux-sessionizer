@@ -185,7 +185,6 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-tmux_running=$(pgrep tmux)
 
 if [[ "$sessions" = true ]]; then
     if [[ -n "$new_directory" ]]; then
@@ -196,6 +195,7 @@ if [[ "$sessions" = true ]]; then
         die "-s|--sessions cannot be specified with -d|--directory"
     fi
 
+    tmux_running=$(pgrep tmux)
     if [[ -z $tmux_running ]]; then
         die "Tmux is not running."
     fi
