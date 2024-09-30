@@ -6,6 +6,11 @@ config="${HOME}/.config/tmux-sessionizer/config"
 verbose=false
 sessions=false
 
+check_sessions() {
+    tmux has-session -t="$1" > /dev/null 2>&1
+    return $?
+}
+
 die() {
     shout "ERROR: $1" >&2
     exit 1
@@ -85,22 +90,25 @@ trim() {
 }
 
 tmux_connect() {
+    # tmux doesn't accept . as part of the name
+    selected_name=$(echo "$1" | tr . _)
     if [[ -z $TMUX ]]; then
         tmux_command="attach-session"
-        msg="Attaching to ${1} session"
+        msg="Attaching to ${selected_name} session"
     else
         tmux_command="switch-client"
-        msg="Switching to ${1} session"
+        msg="Switching to ${selected_name} session"
     fi
 
-    if [[ $(tmux has-session -t="$1" > /dev/null 2>&1; echo $?) -eq 0 ]]; then
+    check_sessions "$1"
+    if [[ $? -eq 0 ]]; then
         debug "Session exists"
     else
-        debug "Starting new session in detached mode with ${1} in ${2} directory."
-        tmux new-session -ds "$1" -c "$2"
+        debug "Starting new session in detached mode with ${selected_name} in ${2} directory."
+        tmux new-session -ds "$selected_name" -c "$2"
     fi
     debug "$msg"
-    tmux "$tmux_command" -t "$1"
+    tmux "$tmux_command" -t "$selected_name"
 }
 
 warn() {
@@ -122,7 +130,7 @@ if [[ -f "$config" ]]; then
 
         debug "Evaluating key: ${key}, value: ${value}."
         case "$key" in
-            directory) directories+=("$value") ;;
+            directory) directories+=("${value/#\~/$HOME}") ;;
             *) warn "Unknown key ${key}. Skipping..." ;;
         esac
     done < $config
@@ -137,25 +145,27 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         -d|--directory)
             if [[ "$2" ]]; then
-                cli_directories+=($2)
+                cli_directories+=("$2")
                 shift
             else
                 die "--directories ${non_empty_error}"
             fi
             ;;
         --directory=?*)
-            cli_directories+=${1#*=}
+            cli_directories+="${1#*=}"
+            cli_directories+="${cli_directories/#\~/$HOME}"
             ;;
         -c|--config)
             if [[ "$2" ]]; then
-                config=$2
+                config="$2"
                 shift
             else
                 die "--config ${non_empty_error}"
             fi
             ;;
         --config=?*)
-            config=${1#*=}
+            config="${1#*=}"
+            config="${config/#\~/$HOME}"
             ;;
         -n|--new)
             if [[ "$2" ]]; then
@@ -166,7 +176,8 @@ while [[ "$#" -gt 0 ]]; do
             fi
             ;;
         --new=?*)
-            new_directory=${1#*=}
+            new_directory="${1#*=}"
+            new_directory="${new_directory/#\~/$HOME}"
             ;;
         -s|--sessions)
             sessions=true
@@ -175,10 +186,10 @@ while [[ "$#" -gt 0 ]]; do
             verbose=true
             ;;
         -?*)
-            warn "Unknown option: ${1}. Skipping..." >&2
+            die "Unknown option: ${1}."
             ;;
         *)
-            search=$1
+            search="$1"
             debug "Setting search to ${1}"
             ;;
     esac
@@ -227,23 +238,28 @@ if [[ -n "$new_directory" ]]; then
         die "-n|--new cannot be specified with -d|--directory"
     fi
 
-    if [[ -d "$new_directory" ]]; then
-        shout "Directory ${new_directory} already exists. Skipping."
-    else
-        mkdir -p "$new_directory"
-        if [[ $? -ne 0 ]]; then
-            die "Create directory ${new_directory} failed. Exiting."
+    selected_name="${new_directory##*/}"
+    check_sessions "$selected_name"
+    if [[ $? -eq 0 ]]; then
+        alt_name="$new_directory"
+        if [[ "$selected_name" == "$alt_name" ]]; then
+            parent_dir=$(dirname "$new_directory")
+            alt_name=$(printf "${parent_dir}/${new_directory}")
         fi
+        debug "Session with name ${selected_name} already exists. Using ${alt_name} as name."
+        selected_name="$alt_name"
     fi
+
+    mkdir -p "$new_directory"
+    if [[ $? -ne 0 ]]; then
+        die "Failed to created directory ${new_directory}"
+    fi
+
+    tmux_connect "$selected_name" "$new_directory"
+    exit 0
 fi
 
-if [[ -n "$new_directory" ]]; then
-    parent_directory=$(dirname "$new_directory")
-    debug "Setting directory to ${parent_directory}"
-    directories=("$parent_directory")
-    debug "Setting search to ${new_directory}"
-    search="$new_directory"
-elif [[ "${#cli_directories[@]}" -gt 0 ]]; then
+if [[ "${#cli_directories[@]}" -gt 0 ]]; then
     directories=("${cli_directories[@]}")
 fi
 
@@ -274,18 +290,25 @@ for directory in "${directories[@]}"; do
     fi
 done
 
-if [[ -z all_results ]]; then
-    die "No directories found with specified criteria."
+if [[ -z "$all_results" ]]; then
+    die "No directories or sessions found with specified criteria."
 fi
 
 search "$all_results" "$search"
 
-if [[ -z $selected ]]; then
+if [[ -z "$selected" ]] && [[ -n "$search" ]]; then
+    debug "No results found. Falling through to check existing sessions."
+    sessions=$(tmux list-sessions 2>/dev/null)
+    search "$sessions" "$search"
+    selected=$(shout "$selected" | cut -d ":" -f 1)
+fi
+
+if [[ -z "$selected" ]]; then
     shout "No results selected."
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
+selected_name=$(basename "$selected")
 
 tmux_connect "$selected_name" "$selected"
 exit 0
