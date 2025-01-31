@@ -284,7 +284,7 @@ for directory in "${directories[@]}"; do
         debug "Running: \"find ${path} -mindepth ${mindepth} -maxdepth ${maxdepth} -type d\""
         results=$(find ${path} -mindepth ${mindepth} -maxdepth ${maxdepth} -type d)
         debug "Results: ${results}"
-        all_results+=$(shout "$results")
+        all_results+="$results"$'\n'
     else
         warn "Path ${path} not found. Skipping..."
     fi
