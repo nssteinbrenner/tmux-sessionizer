@@ -5,6 +5,8 @@ non_empty_error="requires a non-empty argument"
 config="${HOME}/.config/tmux-sessionizer/config"
 verbose=false
 sessions=false
+return_session=""
+return_client=""
 
 check_sessions() {
     tmux has-session -t="$1" > /dev/null 2>&1
@@ -107,6 +109,11 @@ tmux_connect() {
         debug "Starting new session in detached mode with ${selected_name} in ${2} directory."
         tmux new-session -ds "$selected_name" -c "$2"
     fi
+    if [[ -n "$return_session" ]] && [[ -n "$return_client" ]] && [[ "$return_session" != "$selected_name" ]]; then
+        debug "Setting return hook for ${return_session} when ${selected_name} closes."
+        tmux set-option -t "$selected_name" detach-on-destroy off
+        tmux set-hook -a -t "$selected_name" session-closed "switch-client -c \"$return_client\" -t \"$return_session\""
+    fi
     debug "$msg"
     tmux "$tmux_command" -t "$selected_name"
 }
@@ -117,6 +124,12 @@ warn() {
 
 if [[ -n "$TMS_CONFIG" ]]; then
     config="$TMS_CONFIG"
+fi
+
+if [[ -n "$TMUX" ]]; then
+    return_session=$(tmux display-message -p '#S')
+    return_client=$(tmux display-message -p '#{client_tty}')
+    debug "Captured return session ${return_session} for client ${return_client}."
 fi
 
 debug "Reading config ${config}."
